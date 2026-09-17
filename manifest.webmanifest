@@ -1,0 +1,15 @@
+{
+  "name": "영어 여행 준비",
+  "short_name": "영어여행",
+  "description": "여행 상황을 듣고 직접 말하며 연습하는 초보자용 여행 영어 앱",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#101828",
+  "orientation": "portrait-primary",
+  "icons": [
+    {"src":"public/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"public/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
