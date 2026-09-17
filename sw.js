@@ -1,4 +1,4 @@
-const CACHE = 'english-travel-prep-v2';
+const CACHE = 'english-travel-prep-v2.1';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './src/styles.css', './src/app.js',
   './src/data/scenarios.js', './src/domain/evaluateAnswer.js', './src/domain/practiceMachine.js',

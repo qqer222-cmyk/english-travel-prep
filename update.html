@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>영어 여행 준비 · 업데이트</title>
+<style>body{font-family:system-ui,sans-serif;max-width:460px;margin:80px auto;padding:24px;line-height:1.7;color:#101828}button{background:#6656f4;color:white;border:0;border-radius:14px;padding:16px;font-size:17px;width:100%}</style>
+<h1>음성인식 수정본을<br>불러오고 있어요.</h1><p id="status" role="status">학습 기록은 그대로 유지돼요. 잠시만 기다려 주세요.</p><button id="retry" hidden>다시 시도</button>
+<script>
+const statusText=document.querySelector('#status');
+document.querySelector('#retry').onclick=()=>location.reload();
+function activated(worker){return new Promise((resolve,reject)=>{
+ const timer=setTimeout(()=>finish(new Error('timeout')),25000);
+ function finish(error){clearTimeout(timer);worker.removeEventListener('statechange',check);error?reject(error):resolve();}
+ function check(){if(worker.state==='activated')finish();if(worker.state==='redundant')finish(new Error('install'));}
+ worker.addEventListener('statechange',check);check();
+});}
+(async()=>{
+ try{
+  if('serviceWorker' in navigator){
+   const registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+   await registration.update();
+   const incoming=registration.installing||registration.waiting;
+   if(incoming)await activated(incoming);
+   await navigator.serviceWorker.ready;
+  }
+  location.replace('./?v=2.1');
+ }catch{
+  statusText.textContent='업데이트 연결이 완료되지 않았어요. 인터넷 연결을 확인하고 다시 시도해 주세요.';
+  document.querySelector('#retry').hidden=false;
+ }
+})();
+</script></html>
