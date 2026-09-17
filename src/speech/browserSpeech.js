@@ -32,16 +32,26 @@ export function createRecognizer(env=globalThis) {
   let session=null;
   function finish(s,error) {
     if(session!==s)return;
-    session=null; clearTimeout(s.timer);clearTimeout(s.stopTimer);
+    session=null; clearTimeout(s.timer);clearTimeout(s.stopTimer);clearTimeout(s.startTimer);
     s.active?.abort?.();
-    if(error)s.reject(error);else s.resolve({transcript:[...s.segments,s.current].filter(Boolean).join(' ').trim()});
+    const transcript=[...s.segments,s.current].filter(Boolean).join(' ').trim();
+    if(error)s.reject({...error,diagnostics:s.diagnostics});
+    else if(!transcript)s.reject({type:'no-result',diagnostics:s.diagnostics});
+    else s.resolve({transcript});
   }
   function begin(s) {
     if(session!==s||s.stopping)return;
     const recognition=new Recognition();s.active=recognition;s.current='';
+    s.diagnostics.starts++;
     recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+    recognition.onstart=()=>{
+      if(session!==s)return;clearTimeout(s.startTimer);s.diagnostics.connected=true;
+      s.onReady?.();s.onStatus?.('인식 연결됨 · 말을 마치면 종료 버튼을 눌러 주세요.');
+    };
+    recognition.onspeechstart=()=>{if(session===s)s.diagnostics.speechDetected=true;};
     recognition.onresult=e=>{
       if(session!==s)return;
+      clearTimeout(s.startTimer);s.diagnostics.results++;
       // Rebuild this engine session; interim text replaces itself, never appends twice.
       s.current=Array.from(e.results,r=>r[0]?.transcript??'').join(' ').trim();
       s.onTranscript?.([...s.segments,s.current].filter(Boolean).join(' '));
@@ -57,10 +67,12 @@ export function createRecognizer(env=globalThis) {
       s.active=null;
       if(s.stopping){finish(s);return;}
       if(s.current){s.segments.push(s.current);s.current='';s.emptyEnds=0;}else s.emptyEnds++;
-      if(s.emptyEnds>8){finish(s,{type:'no-speech'});return;}
+      if(s.emptyEnds>8){finish(s,{type:'no-result'});return;}
       s.onStatus?.('음성 연결을 이어가는 중이에요. 버튼을 누르기 전에는 평가하지 않아요.');
       s.timer=setTimeout(()=>begin(s),250);
     };
+    clearTimeout(s.startTimer);
+    s.startTimer=setTimeout(()=>finish(s,{type:'start-timeout'}),20000);
     try {recognition.start();} catch {finish(s,{type:'unknown'});}
   }
   return {
@@ -69,14 +81,16 @@ export function createRecognizer(env=globalThis) {
       if(!Recognition)return Promise.reject({type:'unsupported'});
       if(session)finish(session,{type:'cancelled'});
       return new Promise((resolve,reject)=>{
-        session={resolve,reject,segments:[],current:'',emptyEnds:0,...options};begin(session);
+        session={resolve,reject,segments:[],current:'',emptyEnds:0,diagnostics:{starts:0,results:0,connected:false,speechDetected:false},...options};begin(session);
       });
     },
     stop() {
       const s=session;if(!s||s.stopping)return;
       s.stopping=true;clearTimeout(s.timer);
       if(!s.active){finish(s);return;}
-      s.stopTimer=setTimeout(()=>finish(s),2000);
+      // stop() requests the final result; it is not a synchronous transcription.
+      // Slow mobile responses must not be discarded after only two seconds.
+      s.stopTimer=setTimeout(()=>finish(s,{type:'recognition-timeout'}),12000);
       try{s.active.stop();}catch{finish(s);}
     },
     cancel(){if(session)finish(session,{type:'cancelled'});}
