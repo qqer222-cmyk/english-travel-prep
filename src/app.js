@@ -7,7 +7,8 @@ const app = document.querySelector('#app');
 const speaker = createSpeaker(window);
 const recognizer = createRecognizer(window);
 const recorder = createRecorder(window);
-let audioUrl = null, attemptToken = 0, promptTimer = null, audioNotice = '';
+let audioUrl = null, attemptToken = 0, promptTimer = null, audioNotice = '', speechDiagnostics = null;
+function captureBusy() { return practice && ['starting','listening','stopping','record-starting','recording','record-stopping'].includes(practice.phase); }
 let voiceSettings = {voiceURI:'',rate:.9};
 try { voiceSettings = {...voiceSettings,...JSON.parse(localStorage.getItem('english-travel-voice')||'{}')}; } catch {}
 let learning = loadLearningState(localStorage);
@@ -33,7 +34,7 @@ function logo() { return `<div class="logo"><span class="logo-mark">E</span><spa
 function cleanup() {
   attemptToken++; clearTimeout(promptTimer); recognizer.cancel(); recorder.cancel(); speaker.cancel();
   app.querySelector('audio')?.pause();
-  if(audioUrl) URL.revokeObjectURL(audioUrl); audioUrl=null; audioNotice='';
+  if(audioUrl) URL.revokeObjectURL(audioUrl); audioUrl=null; audioNotice='';speechDiagnostics=null;
 }
 function go(next) { cleanup(); screen = next; render(); }
 function speechOptions(slow=false) { return {voiceURI:voiceSettings.voiceURI,rate:slow?.65:Number(voiceSettings.rate)||.9}; }
@@ -53,7 +54,7 @@ function renderHome() {
       <button class="primary-button" data-action="today">오늘의 연습 시작 · ${today.emoji} ${today.title}</button>
     </div>
     <div id="install-slot"></div>
-    ${voiceControls()}<p class="small-note">업데이트 v2 · 무료 브라우저 음성 기능</p>
+    ${voiceControls()}<p class="small-note">업데이트 v2.1 · 음성인식 호환성 수정</p>
     <div class="section-head"><h2>바로 시작하기</h2></div>
     <div class="quick-grid">
       <button class="quick-card" data-action="scenarios"><span class="quick-icon">🗺️</span><strong>상황별 연습</strong><small>공항부터 쇼핑까지 골라서 연습</small></button>
@@ -91,7 +92,8 @@ function renderPractice() {
   }
   const turn = activeScenario.turns[practice.turnIndex];
   const listening = practice.phase === 'listening';
-  const busy = ['starting','listening','stopping'].includes(practice.phase);
+  const busy = captureBusy();
+  const recording = practice.phase === 'recording';
   const hasAttempt = Boolean(practice.transcript);
   const error = practice.errorMessage ? `<div class="error-box">${escapeHtml(practice.errorMessage)}</div>` : '';
   return shell(`<section class="screen practice-screen">
@@ -103,9 +105,11 @@ function renderPractice() {
     <div class="transcript" ${hasAttempt?'':'hidden'}>인식된 말 · <strong id="live-transcript">${escapeHtml(practice.transcript)}</strong></div>
     ${audioUrl?`<div class="recording-playback"><strong>🎧 내가 말한 거 듣기</strong><audio controls preload="metadata" src="${escapeHtml(audioUrl)}"></audio><small>방금 녹음한 실제 목소리예요. 다시 말하거나 이동하면 지워져요.</small></div>`:''}
     ${audioNotice?`<p class="small-note">${escapeHtml(audioNotice)}</p>`:''}
-    ${error}${renderFeedback()}
+    ${error}${speechDiagnostics?`<details class="small-note"><summary>인식 문제 확인 정보</summary><p>연결 ${speechDiagnostics.connected?'됨':'안 됨'} · 음성 감지 ${speechDiagnostics.speechDetected?'됨':'확인 안 됨'} · 문장 수 ${speechDiagnostics.results} · 연결 시도 ${speechDiagnostics.starts}</p></details>`:''}${renderFeedback()}
     <div class="listen-area">
-      ${practice.phase === 'feedback' ? `<button class="primary-button" data-action="retry">🎙️ 한 번 더 말하기</button>` : `<div class="mic-wrap"><button class="mic-button ${listening ? 'listening':''}" data-action="listen" aria-label="${listening?'말하기 종료':'말하기 시작'}" ${busy&&!listening?'disabled':''}>${listening?'⏹':'🎙️'}</button><div class="mic-label">${listening?'다시 누르면 종료 · 평가':practice.phase==='starting'?'마이크 준비 중…':practice.phase==='stopping'?'마지막 말을 확인 중…':'눌러서 말하기'}</div></div>`}
+      ${practice.phase === 'feedback' ? `<button class="primary-button" data-action="retry">🎙️ 한 번 더 말하기</button>` : `<div class="mic-wrap"><button class="mic-button ${listening||recording ? 'listening':''}" data-action="${recording?'record':'listen'}" aria-label="${recording?'녹음 종료':listening?'말하기 종료':'말하기 시작'}" ${busy&&!listening&&!recording?'disabled':''}>${listening||recording?'⏹':'🎙️'}</button><div class="mic-label">${recording?'다시 누르면 녹음 종료 · 평가 없음':listening?'다시 누르면 종료 · 평가':practice.phase==='starting'?'음성인식 연결 중…':practice.phase==='stopping'?'인식 결과를 기다리는 중…':practice.phase==='record-starting'?'녹음 준비 중…':practice.phase==='record-stopping'?'녹음 저장 중…':'눌러서 말하기 평가'}</div></div>`}
+      <button class="secondary-button" data-action="record" ${busy&&!recording?'disabled':''}>${recording?'⏹ 녹음 종료':'🎧 내 목소리 녹음 연습 (평가 없음)'}</button>
+      <p class="small-note">마이크 충돌을 피하려고 평가와 녹음을 따로 사용해요. 평가할 때는 녹음하지 않아요.</p>
       <p id="recognition-status" class="small-note" role="status"></p>
       <div class="question-nav"><button class="secondary-button" data-action="previous" ${busy||practice.turnIndex===0?'disabled':''}>← 이전 질문</button><button class="secondary-button" data-action="next" ${busy?'disabled':''}>${practice.turnIndex===activeScenario.turns.length-1?'연습 마침':'다음 질문 →'}</button></div>
       <div class="help-grid"><button class="help-button" data-help="replay" ${busy?'disabled':''}>🔊 다시 듣기</button><button class="help-button" data-help="slow" ${busy?'disabled':''}>🐢 천천히</button><button class="help-button" data-help="sentence">👀 문장 보기</button><button class="help-button" data-help="translation">🇰🇷 뜻 보기</button></div>
@@ -137,14 +141,17 @@ async function playPrompt(slow=false) {
     render();
     return;
   }
-  if (['starting','listening','stopping'].includes(practice.phase)) return;
+  if (captureBusy()) return;
   app.querySelector('audio')?.pause();
   try { await speaker.speak(turn.prompt, speechOptions(slow)); } catch { practice.showSentence=true;practice.errorMessage='음성 재생이 어려워 문장을 표시했어요. 목소리 설정을 바꾸거나 다시 듣기를 눌러 주세요.';render(); }
 }
 
 function recognitionMessage(type) {
   if (type === 'permission-denied') return '마이크 권한이 필요해요. 브라우저 설정에서 마이크를 허용한 뒤 다시 시도해 주세요.';
-  if (type === 'no-speech') return '잘 안 들렸어요. 다시 말해봐요.';
+  if (type === 'no-speech' || type === 'no-result') return '음성인식이 문장을 반환하지 않았어요. 발음 오답으로 처리하지 않았어요. Chrome에서 다시 시도해 주세요. (인식 결과 없음)';
+  if (type === 'start-timeout') return '음성인식 연결이 시작되지 않았어요. 마이크 권한과 인터넷 연결을 확인해 주세요. 답변은 평가하지 않았어요.';
+  if (type === 'recognition-timeout') return '음성인식 응답이 늦어 이번 답변은 평가하지 않았어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';
+  if (type === 'audio-capture') return '음성인식이 마이크를 열지 못했어요. 통화나 다른 녹음 앱을 종료한 뒤 다시 시도해 주세요.';
   if (type === 'network') return '음성인식 네트워크 연결이 불안정해요. 잠시 후 다시 시도해 주세요.';
   if (type === 'unsupported') return '이 브라우저에서는 음성인식을 사용할 수 없어요. Android Chrome을 권장해요.';
   return '음성인식을 시작하지 못했어요. 다시 시도해 주세요.';
@@ -152,34 +159,54 @@ function recognitionMessage(type) {
 
 async function listen() {
   if(practice.phase==='listening'){practice.phase='stopping';recognizer.stop();render();return;}
-  if(['starting','stopping'].includes(practice.phase))return;
+  if(captureBusy())return;
   if (!recognizer.supported) {
     practice = failSpeech(practice, recognitionMessage('unsupported')); render(); return;
   }
   cleanup();const token=attemptToken;
   practice = {...startListening(practice),phase:'starting',transcript:'',evaluation:null}; render();
   try {
-    if(recorder.supported) await recorder.start();
-    else audioNotice='이 브라우저는 녹음 재생을 지원하지 않아요. 음성인식만 사용해요.';
-    if(token!==attemptToken)return;
-    practice.phase='listening';render();
-    const result = await recognizer.listen({onTranscript(text){
+    // No getUserMedia/MediaRecorder here: recognition owns the microphone.
+    // Start synchronously in the user's click gesture.
+    const result = await recognizer.listen({onReady(){
+      if(token!==attemptToken||practice.phase==='stopping')return;
+      practice.phase='listening';render();
+    },onTranscript(text){
       if(token!==attemptToken)return;practice.transcript=text;
       const el=app.querySelector('#live-transcript');if(el){el.textContent=text;el.parentElement.hidden=!text;}
     },onStatus(text){const el=app.querySelector('#recognition-status');if(el)el.textContent=text;}});
-    const blob=await recorder.stop();
     if(token!==attemptToken)return;
-    if(blob?.size)audioUrl=URL.createObjectURL(blob);
     const turn = activeScenario.turns[practice.turnIndex];
-    if (!result.transcript.trim()) throw { type:'no-speech' };
+    if (!result.transcript.trim()) throw { type:'no-result' };
     practice = receiveTranscript(practice, turn, result.transcript);
     render();
   } catch (error) {
     if(token!==attemptToken||error?.type==='cancelled')return;
-    recorder.cancel();
+    speechDiagnostics=error?.diagnostics??null;
     practice = failSpeech(practice, recognitionMessage(error?.name==='NotAllowedError'?'permission-denied':error?.type));
     render();
   }
+}
+
+async function recordVoice() {
+  if(practice.phase==='recording'){
+    const token=attemptToken;practice.phase='record-stopping';render();
+    try {
+      const blob=await recorder.stop();if(token!==attemptToken)return;
+      if(!blob?.size)throw new Error('empty-recording');
+      audioUrl=URL.createObjectURL(blob);audioNotice='녹음이 끝났어요. 재생해서 내 목소리를 확인해 보세요. 이 녹음은 평가하지 않아요.';
+      practice.phase='recorded';render();
+    }catch{if(token===attemptToken){recorder.cancel();practice=failSpeech(practice,'녹음을 저장하지 못했어요. 다시 시도해 주세요.');render();}}
+    return;
+  }
+  if(captureBusy())return;
+  cleanup();const token=attemptToken;
+  practice={...retryTurn(practice),phase:'record-starting'};render();
+  if(!recorder.supported){practice=failSpeech(practice,'이 브라우저는 녹음을 지원하지 않아요. 말하기 평가는 따로 사용할 수 있어요.');render();return;}
+  try {
+    await recorder.start();if(token!==attemptToken)return;
+    practice.phase='recording';audioNotice='녹음 중이에요. 마치면 종료 버튼을 눌러 주세요. 이 모드에서는 문장을 인식하거나 평가하지 않아요.';render();
+  }catch(error){if(token!==attemptToken)return;recorder.cancel();practice=failSpeech(practice,error?.name==='NotAllowedError'?'녹음하려면 마이크 권한을 허용해 주세요.':'녹음을 시작하지 못했어요. 마이크를 확인해 주세요.');render();}
 }
 
 function recordHelp(kind) {
@@ -195,6 +222,7 @@ function bindEvents() {
     if (action === 'review') go({name:'review'});
     if (action === 'today') startScenario(scenarios[learning.completedSessions % scenarios.length].id);
     if (action === 'listen') await listen();
+    if (action === 'record') await recordVoice();
     if (action === 'retry') { cleanup();practice = retryTurn(practice); await listen(); }
     if (action === 'next') { cleanup();practice = advanceTurn(practice, activeScenario); render(); }
     if (action === 'previous') { cleanup();practice = previousTurn(practice); render(); }
@@ -249,7 +277,7 @@ function render() {
 }
 
 window.speechSynthesis?.addEventListener('voiceschanged',()=>{if(screen.name==='home'||(screen.name==='practice'&&practice.phase==='ready'))render();});
-document.addEventListener('visibilitychange',()=>{if(document.hidden){const busy=practice&&['starting','listening','stopping'].includes(practice.phase);cleanup();if(busy)practice=failSpeech(practice,'화면을 벗어나 녹음을 중단했어요. 답변은 평가하지 않았어요.');if(screen.name==='practice')render();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){const busy=captureBusy();cleanup();if(busy)practice=failSpeech(practice,'화면을 벗어나 마이크를 중단했어요. 답변은 평가하지 않았어요.');if(screen.name==='practice')render();}});
 window.addEventListener('pagehide',cleanup);
 window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); deferredInstallPrompt = event; if(screen.name==='home')render(); });
 window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; });
